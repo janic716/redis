@@ -180,6 +180,18 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
     sds copy = sdsdup(key->ptr);
     int retval = dictAdd(db->dict, copy, val);
 
+    //codis
+    do {
+        uint32_t crc;
+        int hastag;
+        int slot = slots_num(key->ptr, &crc, &hastag);
+        dictAdd(db->hash_slots[slot], copy, (void *)(long)crc);
+        if (hastag) {
+            incrRefCount(key);
+            zslInsert(db->tagged_keys, (double)crc, key->ptr);
+        }
+    } while (0);
+
     serverAssertWithInfo(NULL,key,retval == DICT_OK);
     if (val->type == OBJ_LIST ||
         val->type == OBJ_ZSET ||
@@ -307,6 +319,20 @@ int dbSyncDelete(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
+
+//codis
+    do {
+        uint32_t crc;
+        int hastag;
+        int slot = slots_num(key->ptr, &crc, &hastag);
+        if (dictDelete(db->hash_slots[slot], key->ptr) == DICT_OK) {
+            if (hastag) {
+                zslDelete(db->tagged_keys, (double)crc, key->ptr, NULL);
+            }
+        }
+    } while (0);
+
+
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
         if (server.cluster_enabled) slotToKeyDel(key->ptr);
         return 1;
@@ -411,6 +437,12 @@ long long emptyDbGeneric(redisDb *dbarray, int dbnum, int flags, void(callback)(
 
     for (int j = startdb; j <= enddb; j++) {
         removed += dictSize(dbarray[j].dict);
+
+        //codis
+        for (int i = 0; i < HASH_SLOTS_SIZE; i ++) {
+            dictEmpty(server.db[j].hash_slots[i], NULL);
+        }
+
         if (async) {
             emptyDbAsync(&dbarray[j]);
         } else {
@@ -971,7 +1003,16 @@ void shutdownCommand(client *c) {
      * Also when in Sentinel mode clear the SAVE flag and force NOSAVE. */
     if (server.loading || server.sentinel_mode)
         flags = (flags & ~SHUTDOWN_SAVE) | SHUTDOWN_NOSAVE;
-    if (prepareForShutdown(flags) == C_OK) exit(0);
+    if (prepareForShutdown(flags) == C_OK) {
+        for (int j = 0; j < server.dbnum; j ++) {
+            for (int i = 0; i < HASH_SLOTS_SIZE; i ++) {
+                dictRelease(server.db[j].hash_slots[i]);
+            }
+            zslFree(server.db[j].tagged_keys);
+        }
+
+        exit(0);
+    }
     addReplyError(c,"Errors trying to SHUTDOWN. Check logs.");
 }
 

@@ -1012,7 +1012,32 @@ struct redisCommand redisCommandTable[] = {
 
     {"stralgo",stralgoCommand,-2,
      "read-only @string",
-     0,lcsGetKeys,0,0,0,0,0,0}
+     0,lcsGetKeys,0,0,0,0,0,0},
+
+     {"slotsinfo",slotsinfoCommand,-1,"read-only @slots", 0,NULL,0,0,0,0,0,0},
+     {"slotsscan",slotsscanCommand,-3,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+     {"slotsdel",slotsdelCommand,-2,"read-only @slots",0,NULL,1,-1,1,0,0, 0},
+     {"slotsmgrtslot",slotsmgrtslotCommand,5,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrttagslot",slotsmgrttagslotCommand,5,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrtone",slotsmgrtoneCommand,5,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrttagone",slotsmgrttagoneCommand,5,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotshashkey",slotshashkeyCommand,-1,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotscheck",slotscheckCommand,0,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsrestore",slotsrestoreCommand,-4,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrtslot-async",slotsmgrtSlotAsyncCommand,8,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrttagslot-async",slotsmgrtTagSlotAsyncCommand,8,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrtone-async",slotsmgrtOneAsyncCommand,-7,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrttagone-async",slotsmgrtTagOneAsyncCommand,-7,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrtone-async-dump",slotsmgrtOneAsyncDumpCommand,-4,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrttagone-async-dump",slotsmgrtTagOneAsyncDumpCommand,-4,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrt-async-fence",slotsmgrtAsyncFenceCommand,0,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrt-async-cancel",slotsmgrtAsyncCancelCommand,0,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrt-async-status",slotsmgrtAsyncStatusCommand,0,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsmgrt-exec-wrapper",slotsmgrtExecWrapperCommand,-3,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsrestore-async",slotsrestoreAsyncCommand,-2,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsrestore-async-auth",slotsrestoreAsyncAuthCommand,2,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsrestore-async-select",slotsrestoreAsyncSelectCommand,2,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsrestore-async-ack",slotsrestoreAsyncAckCommand,3,"read-only @slots",0,NULL,0,0,0,0,0, 0},
 };
 
 /*============================ Utility functions ============================ */
@@ -1350,6 +1375,15 @@ dictType hashDictType = {
     dictSdsDestructor           /* val destructor */
 };
 
+dictType hashSlotType = {
+        dictSdsHash,                /* hash function */
+        NULL,                       /* key dup */
+        NULL,                       /* val dup */
+        dictSdsKeyCompare,          /* key compare */
+        NULL,                       /* key destructor */
+        NULL                        /* val destructor */
+};
+
 /* Keylist hash table type has unencoded redis objects as keys and
  * lists as values. It's used for blocking operations (BLPOP) and to
  * map swapped keys to a list of clients waiting for this keys to be loaded. */
@@ -1431,8 +1465,16 @@ int htNeedsResize(dict *dict) {
 /* If the percentage of used slots in the HT reaches HASHTABLE_MIN_FILL
  * we resize the hash table to save memory */
 void tryResizeHashTables(int dbid) {
-    if (htNeedsResize(server.db[dbid].dict))
+    if (htNeedsResize(server.db[dbid].dict)) {
         dictResize(server.db[dbid].dict);
+
+        for (int i = 0; i < HASH_SLOTS_SIZE; i ++) {
+            dict *d = server.db[dbid].hash_slots[i];
+            if (htNeedsResize(d)) {
+                dictResize(d);
+            }
+        }
+    }
     if (htNeedsResize(server.db[dbid].expires))
         dictResize(server.db[dbid].expires);
 }
@@ -1450,6 +1492,23 @@ int incrementallyRehash(int dbid) {
         dictRehashMilliseconds(server.db[dbid].dict,1);
         return 1; /* already used our millisecond for this loop... */
     }
+    //codis
+    if (server.db[dbid].hash_slots_rehashing) {
+        long long start = mstime();
+        for (int i = 0; i < HASH_SLOTS_SIZE; i ++) {
+            int idx = ((i + start) & HASH_SLOTS_MASK);
+            dict *d = server.db[dbid].hash_slots[idx];
+            if (dictIsRehashing(d)) {
+                dictRehashMilliseconds(d, 1);
+                if (mstime() != start) {
+                    return 1; /* already used our millisecond for this loop... */
+                }
+            }
+        }
+        server.db[dbid].hash_slots_rehashing = 0;
+        return 1; /* already used our millisecond for this loop... */
+    }
+
     /* Expires */
     if (dictIsRehashing(server.db[dbid].expires)) {
         dictRehashMilliseconds(server.db[dbid].expires,1);
@@ -2746,6 +2805,9 @@ void initServer(void) {
     signal(SIGPIPE, SIG_IGN);
     setupSignalHandlers();
 
+    //codis
+    crc32_init();
+
     if (server.syslog_enabled) {
         openlog(server.syslog_ident, LOG_PID | LOG_NDELAY | LOG_NOWAIT,
             server.syslog_facility);
@@ -2826,6 +2888,12 @@ void initServer(void) {
         server.db[j].watched_keys = dictCreate(&keylistDictType,NULL);
         server.db[j].id = j;
         server.db[j].avg_ttl = 0;
+
+        //codis
+        for (int i = 0; i < HASH_SLOTS_SIZE; i ++) {
+            server.db[j].hash_slots[i] = dictCreate(&hashSlotType, NULL);
+        }
+
         server.db[j].defrag_later = listCreate();
         listSetFreeMethod(server.db[j].defrag_later,(void (*)(void*))sdsfree);
     }

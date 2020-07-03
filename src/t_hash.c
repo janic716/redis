@@ -832,3 +832,11 @@ void hscanCommand(client *c) {
         checkType(c,o,OBJ_HASH)) return;
     scanGenericCommand(c,o,cursor);
 }
+
+/* Encode given objects in-place when the hash uses a dict. */
+void hashTypeTryObjectEncoding(robj *subject, robj **o1, robj **o2) {
+    if (subject->encoding == OBJ_ENCODING_HT) {
+        if (o1) *o1 = tryObjectEncoding(*o1);
+        if (o2) *o2 = tryObjectEncoding(*o2);
+    }
+}

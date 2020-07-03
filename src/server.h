@@ -83,6 +83,15 @@ typedef long long ustime_t; /* microsecond time type. */
 #include "endianconv.h"
 #include "crc64.h"
 
+
+//codis
+#define HASH_SLOTS_MASK 0x000003ff
+#define HASH_SLOTS_SIZE (HASH_SLOTS_MASK + 1)
+#define CLIENT_SLOTSMGRT_ASYNC_CACHED_CLIENT (1 << 0)
+#define CLIENT_SLOTSMGRT_ASYNC_NORMAL_CLIENT (1 << 1)
+
+
+
 /* Error codes */
 #define C_OK                    0
 #define C_ERR                   -1
@@ -198,6 +207,7 @@ typedef long long ustime_t; /* microsecond time type. */
 #define CMD_CATEGORY_CONNECTION (1ULL<<36)
 #define CMD_CATEGORY_TRANSACTION (1ULL<<37)
 #define CMD_CATEGORY_SCRIPTING (1ULL<<38)
+#define CMD_CATEGORY_SLOTS (1ULL<<39)
 
 /* AOF states */
 #define AOF_OFF 0             /* AOF is off */
@@ -647,6 +657,11 @@ typedef struct redisDb {
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
     dict *ready_keys;           /* Blocked keys that received a PUSH */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
+    //codis
+    dict *hash_slots[HASH_SLOTS_SIZE];
+    int hash_slots_rehashing;
+    struct zskiplist *tagged_keys;
+
     int id;                     /* Database ID */
     long long avg_ttl;          /* Average TTL, just for stats */
     unsigned long expires_cursor; /* Cursor of the active expire cycle. */
@@ -849,6 +864,10 @@ typedef struct client {
     /* Response buffer */
     int bufpos;
     char buf[PROTO_REPLY_CHUNK_BYTES];
+
+    //codis
+    long slotsmgrt_flags;
+    list *slotsmgrt_fenceq;
 } client;
 
 struct saveparam {
@@ -1027,6 +1046,19 @@ struct clusterState;
 #define CHILD_INFO_TYPE_AOF 1
 #define CHILD_INFO_TYPE_MODULE 3
 
+typedef struct {
+    client *c;
+    int used;
+    sds host;
+    int port;
+    long long timeout;
+    long long lastuse;
+    long sending_msgs;
+    void *batched_iter;
+    list *blocked_list;
+} slotsmgrtAsyncClient;
+
+
 struct redisServer {
     /* General */
     pid_t pid;                  /* Main process pid. */
@@ -1089,6 +1121,13 @@ struct redisServer {
     int clients_paused;         /* True if clients are currently paused */
     mstime_t clients_pause_end_time; /* Time when we undo clients_paused */
     char neterr[ANET_ERR_LEN];   /* Error buffer for anet.c */
+
+    //codis
+    dict *slotsmgrt_cached_sockfds;
+    void *slotsmgrt_lazy_release;
+    slotsmgrtAsyncClient *slotsmgrt_cached_clients;
+
+
     dict *migrate_cached_sockets;/* MIGRATE cached sockets */
     _Atomic uint64_t next_client_id; /* Next client unique ID. Incremental. */
     int protected_mode;         /* Don't accept external connections. */
@@ -2018,6 +2057,7 @@ void setTypeConvert(robj *subject, int enc);
 #define HASH_SET_TAKE_VALUE (1<<1)
 #define HASH_SET_COPY 0
 
+void hashTypeTryObjectEncoding(robj *subject, robj **o1, robj **o2);
 void hashTypeConvert(robj *o, int enc);
 void hashTypeTryConversion(robj *subject, robj **argv, int start, int end);
 int hashTypeExists(robj *o, sds key);
@@ -2424,6 +2464,42 @@ int memtest_preserving_test(unsigned long *m, size_t bytes, int passes);
 void mixDigest(unsigned char *digest, void *ptr, size_t len);
 void xorDigest(unsigned char *digest, void *ptr, size_t len);
 int populateCommandTableParseFlags(struct redisCommand *c, char *strflags);
+
+//codis
+int slots_num(const sds s, uint32_t *pcrc, int *phastag);
+void slotsinfoCommand(client *c);
+void slotsscanCommand(client *c);
+void slotsdelCommand(client *c);
+void slotsmgrtslotCommand(client *c);
+void slotsmgrtoneCommand(client *c);
+void slotsmgrttagslotCommand(client *c);
+void slotsmgrttagoneCommand(client *c);
+void slotshashkeyCommand(client *c);
+void slotscheckCommand(client *c);
+void slotsrestoreCommand(client *c);
+
+void slotsmgrtSlotAsyncCommand(client *c);
+void slotsmgrtTagSlotAsyncCommand(client *c);
+void slotsmgrtOneAsyncCommand(client *c);
+void slotsmgrtOneAsyncDumpCommand(client *c);
+void slotsmgrtTagOneAsyncCommand(client *c);
+void slotsmgrtTagOneAsyncDumpCommand(client *c);
+void slotsmgrtAsyncFenceCommand(client *c);
+void slotsmgrtAsyncCancelCommand(client *c);
+void slotsmgrtAsyncStatusCommand(client *c);
+void slotsmgrtExecWrapperCommand(client *c);
+void slotsrestoreAsyncCommand(client *c);
+void slotsrestoreAsyncAuthCommand(client *c);
+void slotsrestoreAsyncSelectCommand(client *c);
+void slotsrestoreAsyncAckCommand(client *c);
+
+void slotsmgrtAsyncCleanup();
+void slotsmgrtAsyncUnlinkClient(client *c);
+void slotsmgrtInitLazyReleaseWorkerThread();
+
+void slotsmgrt_cleanup();
+void crc32_init();
+uint32_t crc32_checksum(const char *buf, int len);
 
 /* TLS stuff */
 void tlsInit(void);

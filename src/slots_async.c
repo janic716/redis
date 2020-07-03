@@ -254,14 +254,14 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
                 ac->used = 1;
                 if (server.requirepass != NULL) {
                     /* SLOTSRESTORE-ASYNC-AUTH $password */
-                    addReplyMultiBulkLen(c, 2);
+                    addReplyArrayLen(c, 2);
                     addReplyBulkCString(c, "SLOTSRESTORE-ASYNC-AUTH");
                     addReplyBulkCString(c, server.requirepass);
                     leading_msgs += 1;
                 }
                 do {
                     /* SLOTSRESTORE-ASYNC-SELECT $db */
-                    addReplyMultiBulkLen(c, 2);
+                    addReplyArrayLen(c, 2);
                     addReplyBulkCString(c, "SLOTSRESTORE-ASYNC-SELECT");
                     addReplyBulkLongLong(c, c->db->id);
                     leading_msgs += 1;
@@ -270,7 +270,7 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
         }
 
         /* SLOTSRESTORE-ASYNC delete $key */
-        addReplyMultiBulkLen(c, 3);
+        addReplyArrayLen(c, 3);
         addReplyBulkCString(c, "SLOTSRESTORE-ASYNC");
         addReplyBulkCString(c, "delete");
         addReplyBulk(c, key);
@@ -299,7 +299,7 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
 
     if (it->stage == STAGE_FILLTTL) {
         /* SLOTSRESTORE-ASYNC expire $key $ttl */
-        addReplyMultiBulkLen(c, 4);
+        addReplyArrayLen(c, 4);
         addReplyBulkCString(c, "SLOTSRESTORE-ASYNC");
         addReplyBulkCString(c, "expire");
         addReplyBulk(c, key);
@@ -314,7 +314,7 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
         createDumpPayload(&payload, val);
 
         /* SLOTSRESTORE-ASYNC object $key $ttl $payload */
-        addReplyMultiBulkLen(c, 5);
+        addReplyArrayLen(c, 5);
         addReplyBulkCString(c, "SLOTSRESTORE-ASYNC");
         addReplyBulkCString(c, "object");
         addReplyBulk(c, key);
@@ -327,7 +327,7 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
 
     if (it->stage == STAGE_PAYLOAD && val->type == OBJ_STRING) {
         /* SLOTSRESTORE-ASYNC string $key $ttl $payload */
-        addReplyMultiBulkLen(c, 5);
+        addReplyArrayLen(c, 5);
         addReplyBulkCString(c, "SLOTSRESTORE-ASYNC");
         addReplyBulkCString(c, "string");
         addReplyBulk(c, key);
@@ -394,7 +394,7 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
             dict *ht = val->ptr;
             void *pd[] = {ll, val, &len};
             do {
-                it->cursor = dictScan(ht, it->cursor, singleObjectIteratorScanCallback, pd);
+                it->cursor = dictScan(ht, it->cursor, singleObjectIteratorScanCallback, NULL, pd);
                 if (it->cursor == 0) {
                     more = 0;
                 }
@@ -409,9 +409,9 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
             zskiplistNode *node = (rank >= 1) ? zslGetElementByRank(zs->zsl, rank) : NULL;
             do {
                 if (node != NULL) {
-                    robj *field = node->obj;
-                    incrRefCount(field);
-                    len += sdslenOrElse(field, 8);
+                    sds field = node->ele;
+//                    incrRefCount(field);
+                    len += sdslen(field);
                     listAddNodeTail(ll, field);
                     uint64_t bits = convertDoubleToRawBits(node->score);
                     robj *score = createRawStringObjectFromUint64(bits);
@@ -427,7 +427,7 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
         }
 
         /* SLOTSRESTORE-ASYNC list/hash/zset/dict $key $ttl $hint [$arg1 ...] */
-        addReplyMultiBulkLen(c, 5 + listLength(ll));
+        addReplyArrayLen(c, 5 + listLength(ll));
         addReplyBulkCString(c, "SLOTSRESTORE-ASYNC");
         addReplyBulkCString(c, cmd);
         addReplyBulk(c, key);
@@ -582,21 +582,22 @@ batchedObjectIteratorAddKey(redisDb *db, batchedObjectIterator *it, robj *key) {
         goto out;
     }
     incrRefCount(key);
-    zslInsert(it->tags, (double)crc, key);
+    zslInsert(it->tags, (double)crc, key->ptr);
 
     if (it->hash_tags == NULL) {
         goto out;
     }
     zskiplistNode *node = zslFirstInRange(it->hash_tags, &range);
     while (node != NULL && node->score == (double)crc) {
-        robj *key = node->obj;
+        robj* key = createStringObject(node->ele, sdslen(node->ele));
         node = node->level[0].forward;
-        if (dictAdd(it->keys, key, NULL) != C_OK) {
+        if (dictAdd(it->keys, node->ele, NULL) != C_OK) {
             continue;
         }
         incrRefCount(key);
         listAddNodeTail(it->list, createSingleObjectIterator(key));
         it->estimate_msgs += estimateNumberOfRestoreCommands(db, key, it->maxbulks);
+        decrRefCount(key);
     }
 
 out:
@@ -624,7 +625,7 @@ notifySlotsmgrtAsyncClient(slotsmgrtAsyncClient *ac, const char *errmsg) {
         } else if (it->hash_slot == NULL) {
             addReplyLongLong(c, listLength(it->removed_keys));
         } else {
-            addReplyMultiBulkLen(c, 2);
+            addReplyArrayLen(c, 2);
             addReplyLongLong(c, listLength(it->removed_keys));
             addReplyLongLong(c, dictSize(it->hash_slot));
         }
@@ -835,12 +836,12 @@ slotsmgrtAsyncDumpGenericCommand(client *c, int usetag) {
         batchedObjectIteratorAddKey(c->db, it, c->argv[i]);
     }
 
-    void *ptr = addDeferredMultiBulkLength(c);
+    void *ptr = addReplyDeferredLen(c);
     int total = 0;
     while (batchedObjectIteratorHasNext(it)) {
         total += batchedObjectIteratorNext(c, it);
     }
-    setDeferredMultiBulkLength(c, ptr, total);
+    setDeferredArrayLen(c, ptr, total);
     freeBatchedObjectIterator(it);
 }
 
@@ -1015,7 +1016,7 @@ slotsmgrtAsyncGenericCommand(client *c, int usetag, int usekey) {
                 loop = 100;
             }
             do {
-                cursor = dictScan(hash_slot, cursor, slotsScanSdsKeyCallback, ll);
+                cursor = dictScan(hash_slot, cursor, slotsScanSdsKeyCallback, NULL, ll);
                 while (listLength(ll) != 0 && it->estimate_msgs < numkeys) {
                     listNode *head = listFirst(ll);
                     robj *key = listNodeValue(head);
@@ -1123,10 +1124,10 @@ slotsmgrtAsyncCancelCommand(client *c) {
 static void
 singleObjectIteratorStatus(client *c, singleObjectIterator *it) {
     if (it == NULL) {
-        addReply(c, shared.nullmultibulk);
+        addReply(c, shared.nullarray[c->resp]);
         return;
     }
-    void *ptr = addDeferredMultiBulkLength(c);
+    void *ptr = addReplyDeferredLen(c);
     int fields = 0;
 
     fields ++; addReplyBulkCString(c, "key");
@@ -1153,22 +1154,22 @@ singleObjectIteratorStatus(client *c, singleObjectIterator *it) {
     fields ++; addReplyBulkCString(c, "chunked_msgs");
     addReplyBulkLongLong(c, it->chunked_msgs);
 
-    setDeferredMultiBulkLength(c, ptr, fields * 2);
+    setDeferredArrayLen(c, ptr, fields * 2);
 }
 
 static void
 batchedObjectIteratorStatus(client *c, batchedObjectIterator *it) {
     if (it == NULL) {
-        addReply(c, shared.nullmultibulk);
+        addReply(c, shared.nullarray[c->resp]);
         return;
     }
-    void *ptr = addDeferredMultiBulkLength(c);
+    void *ptr = addReplyDeferredLen(c);
     int fields = 0;
 
     fields ++; addReplyBulkCString(c, "keys");
-    addReplyMultiBulkLen(c, 2);
+    addReplyArrayLen(c, 2);
     addReplyBulkLongLong(c, dictSize(it->keys));
-    addReplyMultiBulkLen(c, dictSize(it->keys));
+    addReplyArrayLen(c, dictSize(it->keys));
     dictIterator *di = dictGetIterator(it->keys);
     dictEntry *de;
     while((de = dictNext(di)) != NULL) {
@@ -1195,7 +1196,7 @@ batchedObjectIteratorStatus(client *c, batchedObjectIterator *it) {
     addReplyBulkLongLong(c, listLength(it->chunked_vals));
 
     fields ++; addReplyBulkCString(c, "iterators");
-    addReplyMultiBulkLen(c, 2);
+    addReplyArrayLen(c, 2);
     addReplyBulkLongLong(c, listLength(it->list));
     singleObjectIterator *sp = NULL;
     if (listLength(it->list) != 0) {
@@ -1203,7 +1204,7 @@ batchedObjectIteratorStatus(client *c, batchedObjectIterator *it) {
     }
     singleObjectIteratorStatus(c, sp);
 
-    setDeferredMultiBulkLength(c, ptr, fields * 2);
+    setDeferredArrayLen(c, ptr, fields * 2);
 }
 
 /* *
@@ -1213,10 +1214,10 @@ void
 slotsmgrtAsyncStatusCommand(client *c) {
     slotsmgrtAsyncClient *ac = getSlotsmgrtAsyncClient(c->db->id);
     if (ac->c == NULL) {
-        addReply(c, shared.nullmultibulk);
+        addReply(c, shared.nullarray[c->resp]);
         return;
     }
-    void *ptr = addDeferredMultiBulkLength(c);
+    void *ptr = addReplyDeferredLen(c);
     int fields = 0;
 
     fields ++; addReplyBulkCString(c, "host");
@@ -1246,7 +1247,7 @@ slotsmgrtAsyncStatusCommand(client *c) {
     fields ++; addReplyBulkCString(c, "batched_iterator");
     batchedObjectIteratorStatus(c, ac->batched_iter);
 
-    setDeferredMultiBulkLength(c, ptr, fields * 2);
+    setDeferredArrayLen(c, ptr, fields * 2);
 }
 
 /* ============================ SlotsmgrtExecWrapper ======================================= */
@@ -1256,7 +1257,7 @@ slotsmgrtAsyncStatusCommand(client *c) {
  * */
 void
 slotsmgrtExecWrapperCommand(client *c) {
-    addReplyMultiBulkLen(c, 2);
+    addReplyArrayLen(c, 2);
     if (c->argc < 3) {
         addReplyLongLong(c, -1);
         addReplyError(c, "wrong number of arguments for SLOTSMGRT-EXEC-WRAPPER");
@@ -1311,7 +1312,7 @@ slotsrestoreReplyAck(client *c, int err_code, const char *fmt, ...) {
     sds s = sdscatvprintf(sdsempty(), fmt, ap);
     va_end(ap);
 
-    addReplyMultiBulkLen(c, 3);
+    addReplyArrayLen(c, 3);
     addReplyBulkCString(c, "SLOTSRESTORE-ASYNC-ACK");
     addReplyBulkLongLong(c, err_code);
     addReplyBulkSds(c, s);
@@ -1353,7 +1354,7 @@ slotsrestoreAsyncHandle(client *c) {
         }
         int deleted = dbDelete(c->db, key);
         if (deleted) {
-            signalModifiedKey(c->db, key);
+            signalModifiedKey(c, c->db, key);
             server.dirty ++;
         }
         slotsrestoreReplyAck(c, 0, deleted ? "1" : "0");
@@ -1424,7 +1425,7 @@ slotsrestoreAsyncHandle(client *c) {
             slotsrestoreReplyAck(c, -1, "invalid payload type");
             return C_ERR;
         }
-        robj *val = rdbLoadObject(type, &payload);
+        robj *val = rdbLoadObject(type, &payload, key->ptr);
         if (val == NULL) {
             slotsrestoreReplyAck(c, -1, "invalid payload body");
             return C_ERR;
@@ -1507,7 +1508,7 @@ slotsrestoreAsyncHandle(client *c) {
         }
         for (int i = 0; i < xargc; i += 2) {
             hashTypeTryObjectEncoding(val, &xargv[i], &xargv[i + 1]);
-            hashTypeSet(val, xargv[i], xargv[i + 1]);
+            hashTypeSet(val, xargv[i]->ptr, xargv[i + 1]->ptr, HASH_SET_COPY);
         }
         slotsrestoreReplyAck(c, 0, "%d", hashTypeLength(val));
         goto success_common;
@@ -1539,7 +1540,7 @@ slotsrestoreAsyncHandle(client *c) {
         }
         for (int i = 0; i < xargc; i ++) {
             xargv[i] = tryObjectEncoding(xargv[i]);
-            setTypeAdd(val, xargv[i]);
+            setTypeAdd(val, xargv[i]->ptr);
         }
         slotsrestoreReplyAck(c, 0, "%d", setTypeSize(val));
         goto success_common;
@@ -1590,10 +1591,10 @@ slotsrestoreAsyncHandle(client *c) {
             dictEntry *de = dictFind(zset->dict, elem);
             if (de != NULL) {
                 double score = *(double *)dictGetVal(de);
-                zslDelete(zset->zsl, score, elem);
+                zslDelete(zset->zsl, score, elem->ptr, NULL);
                 dictDelete(zset->dict, elem);
             }
-            zskiplistNode *znode = zslInsert(zset->zsl, scores[j], elem);
+            zskiplistNode *znode = zslInsert(zset->zsl, scores[j], elem->ptr);
             incrRefCount(elem);
             dictAdd(zset->dict, elem, &(znode->score));
             incrRefCount(elem);
@@ -1612,11 +1613,11 @@ bad_arguments_number:
 
 success_common:
     if (ttl != 0) {
-        setExpire(c->db, key, mstime() + ttl);
+        setExpire(c, c->db, key, mstime() + ttl);
     } else {
         removeExpire(c->db, key);
     }
-    signalModifiedKey(c->db, key);
+    signalModifiedKey(c, c->db, key);
     server.dirty ++;
     return C_OK;
 }
@@ -1695,7 +1696,7 @@ slotsrestoreAsyncAckHandle(client *c) {
             listNode *head = listFirst(ll);
             robj *key = listNodeValue(head);
             if (dbDelete(c->db, key)) {
-                signalModifiedKey(c->db, key);
+                signalModifiedKey(c, c->db, key);
                 server.dirty ++;
             }
             c->argv[i] = key;

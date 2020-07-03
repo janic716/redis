@@ -90,7 +90,7 @@ parse_slot(client *c, robj *obj, int *p) {
 void
 slotshashkeyCommand(client *c) {
     int i;
-    addReplyMultiBulkLen(c, c->argc - 1);
+    addReplyArrayLen(c, c->argc - 1);
     for (i = 1; i < c->argc; i ++) {
         robj *key = c->argv[i];
         addReplyLongLong(c, slots_num(key->ptr, NULL, NULL));
@@ -137,9 +137,9 @@ slotsinfoCommand(client *c) {
         slots_size[n] = s;
         n ++;
     }
-    addReplyMultiBulkLen(c, n);
+    addReplyArrayLen(c, n);
     for (i = 0; i < n; i ++) {
-        addReplyMultiBulkLen(c, 2);
+        addReplyArrayLen(c, 2);
         addReplyLongLong(c, slots_slot[i]);
         addReplyLongLong(c, slots_size[i]);
     }
@@ -359,7 +359,7 @@ static void
 slotsremove(client *c, robj **keys, int n, int rewrite) {
     for (int i = 0; i < n; i ++) {
         dbDelete(c->db, keys[i]);
-        signalModifiedKey(c->db, keys[i]);
+        signalModifiedKey(c, c->db, keys[i]);
         server.dirty ++;
     }
     if (!rewrite) {
@@ -439,7 +439,7 @@ slotsmgrtslotCommand(client *c) {
             return;
         }
     } while (0);
-    addReplyMultiBulkLen(c, 2);
+    addReplyArrayLen(c, 2);
     addReplyLongLong(c, succ);
     addReplyLongLong(c, dictSize(d));
 }
@@ -501,7 +501,7 @@ slotsdelCommand(client *c) {
         listSetFreeMethod(l, decrRefCountVoid);
         unsigned long cursor = 0;
         do {
-            cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, l);
+            cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, NULL, l);
             while (1) {
                 listNode *head = listFirst(l);
                 if (head == NULL) {
@@ -515,11 +515,11 @@ slotsdelCommand(client *c) {
         } while (cursor != 0);
         listRelease(l);
     }
-    addReplyMultiBulkLen(c, n);
+    addReplyArrayLen(c, n);
     for (i = 0; i < n; i ++) {
         int n = slots_slot[i];
         int s = dictSize(c->db->hash_slots[n]);
-        addReplyMultiBulkLen(c, 2);
+        addReplyArrayLen(c, 2);
         addReplyLongLong(c, n);
         addReplyLongLong(c, s);
     }
@@ -541,7 +541,7 @@ slotscheckCommand(client *c) {
         listSetFreeMethod(l, decrRefCountVoid);
         unsigned long cursor = 0;
         do {
-            cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, l);
+            cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, NULL, l);
             while (1) {
                 listNode *head = listFirst(l);
                 if (head == NULL) {
@@ -572,7 +572,7 @@ slotscheckCommand(client *c) {
         listSetFreeMethod(l, decrRefCountVoid);
         unsigned long cursor = 0;
         do {
-            cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, l);
+            cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, NULL, l);
             while (1) {
                 listNode *head = listFirst(l);
                 if (head == NULL) {
@@ -597,9 +597,11 @@ slotscheckCommand(client *c) {
     }
     zskiplistNode *node = c->db->tagged_keys->header->level[0].forward;
     while (node != NULL && bug == NULL) {
-        if (lookupKeyRead(c->db, node->obj) == NULL) {
-            bug = sdsdup(node->obj->ptr);
+        robj* k = createStringObject(node->ele, sdslen(node->ele));
+        if (lookupKeyRead(c->db, k) == NULL) {
+            bug = sdsdup(node->ele);
         }
+        decrRefCount(k);
         node = node->level[0].forward;
     }
     if (bug != NULL) {
@@ -649,7 +651,7 @@ slotsrestoreCommand(client *c) {
         }
         rioInitWithBuffer(&payload, val->ptr);
         if (((type = rdbLoadObjectType(&payload)) == -1) ||
-                ((vals[i] = rdbLoadObject(type, &payload)) == NULL)) {
+                ((vals[i] = rdbLoadObject(type, &payload, key->ptr)) == NULL)) {
             addReplyError(c, "bad data format");
             goto cleanup;
         }
@@ -663,9 +665,9 @@ slotsrestoreCommand(client *c) {
         dbAdd(c->db, key, val);
         incrRefCount(val);
         if (ttl) {
-            setExpire(c->db, key, mstime() + ttl);
+            setExpire(c, c->db, key, mstime() + ttl);
         }
-        signalModifiedKey(c->db, key);
+        signalModifiedKey(c, c->db, key);
         server.dirty ++;
     }
     addReply(c, shared.ok);
@@ -712,12 +714,11 @@ slotsmgrttag_command(client *c, sds host, sds port, int timeout, robj *key) {
     range.maxex = 0;
 
     list *l = listCreate();
-    listSetFreeMethod(l, decrRefCountVoid);
+    listSetFreeMethod(l, zfree);
 
     zskiplistNode *node = zslFirstInRange(c->db->tagged_keys, &range);
     while (node != NULL && node->score == (double)crc) {
-        listAddNodeTail(l, node->obj);
-        incrRefCount(node->obj);
+        listAddNodeTail(l, node->ele);
         node = node->level[0].forward;
     }
 
@@ -796,7 +797,7 @@ slotsmgrttagslotCommand(client *c) {
             return;
         }
     } while (0);
-    addReplyMultiBulkLen(c, 2);
+    addReplyArrayLen(c, 2);
     addReplyLongLong(c, succ);
     addReplyLongLong(c, dictSize(d));
 }
@@ -860,14 +861,14 @@ slotsscanCommand(client *c) {
 
     long loops = count * 10;
     do {
-        cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, l);
+        cursor = dictScan(d, cursor, slotsScanSdsKeyCallback, NULL, l);
         loops --;
     } while (cursor != 0 && loops > 0 && listLength(l) < count);
 
-    addReplyMultiBulkLen(c, 2);
+    addReplyArrayLen(c, 2);
     addReplyBulkLongLong(c, cursor);
 
-    addReplyMultiBulkLen(c, listLength(l));
+    addReplyArrayLen(c, listLength(l));
     while (1) {
         listNode *head = listFirst(l);
         if (head == NULL) {
