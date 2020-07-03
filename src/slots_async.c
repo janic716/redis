@@ -581,8 +581,7 @@ batchedObjectIteratorAddKey(redisDb *db, batchedObjectIterator *it, robj *key) {
     if (zslFirstInRange(it->tags, &range) != NULL) {
         goto out;
     }
-    incrRefCount(key);
-    zslInsert(it->tags, (double)crc, key->ptr);
+    zslInsert(it->tags, (double)crc, sdsdup(key->ptr));
 
     if (it->hash_tags == NULL) {
         goto out;
@@ -1594,8 +1593,7 @@ slotsrestoreAsyncHandle(client *c) {
                 zslDelete(zset->zsl, score, elem->ptr, NULL);
                 dictDelete(zset->dict, elem);
             }
-            zskiplistNode *znode = zslInsert(zset->zsl, scores[j], elem->ptr);
-            incrRefCount(elem);
+            zskiplistNode *znode = zslInsert(zset->zsl, scores[j], sdsdup(elem->ptr));
             dictAdd(zset->dict, elem, &(znode->score));
             incrRefCount(elem);
         }
