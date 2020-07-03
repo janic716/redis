@@ -187,8 +187,7 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
         int slot = slots_num(key->ptr, &crc, &hastag);
         dictAdd(db->hash_slots[slot], copy, (void *)(long)crc);
         if (hastag) {
-            incrRefCount(key);
-            zslInsert(db->tagged_keys, (double)crc, key->ptr);
+            zslInsert(db->tagged_keys, (double)crc, sdsdup(key->ptr));
         }
     } while (0);
 
@@ -320,19 +319,6 @@ int dbSyncDelete(redisDb *db, robj *key) {
      * the key, because it is shared with the main dictionary. */
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
 
-//codis
-    do {
-        uint32_t crc;
-        int hastag;
-        int slot = slots_num(key->ptr, &crc, &hastag);
-        if (dictDelete(db->hash_slots[slot], key->ptr) == DICT_OK) {
-            if (hastag) {
-                zslDelete(db->tagged_keys, (double)crc, key->ptr, NULL);
-            }
-        }
-    } while (0);
-
-
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
         if (server.cluster_enabled) slotToKeyDel(key->ptr);
         return 1;
@@ -344,6 +330,18 @@ int dbSyncDelete(redisDb *db, robj *key) {
 /* This is a wrapper whose behavior depends on the Redis lazy free
  * configuration. Deletes the key synchronously or asynchronously. */
 int dbDelete(redisDb *db, robj *key) {
+    //codis
+    do {
+        uint32_t crc;
+        int hastag;
+        int slot = slots_num(key->ptr, &crc, &hastag);
+        if (dictDelete(db->hash_slots[slot], key->ptr) == DICT_OK) {
+            if (hastag) {
+                zslDelete(db->tagged_keys, (double)crc, key->ptr, NULL);
+            }
+        }
+    } while (0);
+
     return server.lazyfree_lazy_server_del ? dbAsyncDelete(db,key) :
                                              dbSyncDelete(db,key);
 }
@@ -441,6 +439,10 @@ long long emptyDbGeneric(redisDb *dbarray, int dbnum, int flags, void(callback)(
         //codis
         for (int i = 0; i < HASH_SLOTS_SIZE; i ++) {
             dictEmpty(server.db[j].hash_slots[i], NULL);
+        }
+        if (server.db[j].tagged_keys->length != 0) {
+            zslFree(server.db[j].tagged_keys);
+            server.db[j].tagged_keys = zslCreate();
         }
 
         if (async) {
@@ -570,6 +572,16 @@ void flushdbCommand(client *c) {
 
     if (getFlushCommandFlags(c,&flags) == C_ERR) return;
     server.dirty += emptyDb(c->db->id,flags,NULL);
+    //codis
+    int i;
+    for (i = 0; i < HASH_SLOTS_SIZE; i ++) {
+        dictEmpty(c->db->hash_slots[i], NULL);
+    }
+    if (c->db->tagged_keys->length != 0) {
+        zslFree(c->db->tagged_keys);
+        c->db->tagged_keys = zslCreate();
+    }
+
     addReply(c,shared.ok);
 #if defined(USE_JEMALLOC)
     /* jemalloc 5 doesn't release pages back to the OS when there's no traffic.

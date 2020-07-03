@@ -1490,6 +1490,7 @@ int incrementallyRehash(int dbid) {
     /* Keys dictionary */
     if (dictIsRehashing(server.db[dbid].dict)) {
         dictRehashMilliseconds(server.db[dbid].dict,1);
+        server.db[dbid].hash_slots_rehashing = 1;
         return 1; /* already used our millisecond for this loop... */
     }
     //codis
@@ -2852,6 +2853,15 @@ void initServer(void) {
     }
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
+    //db
+    server.slotsmgrt_cached_sockfds = dictCreate(&migrateCacheDictType, NULL);
+    server.slotsmgrt_cached_clients = zmalloc(sizeof(slotsmgrtAsyncClient) * server.dbnum);
+    for (j = 0; j < server.dbnum; j ++) {
+        slotsmgrtAsyncClient *ac = &server.slotsmgrt_cached_clients[j];
+        memset(ac, 0, sizeof(*ac));
+    }
+    slotsmgrtInitLazyReleaseWorkerThread();
+
     /* Open the TCP listening socket for the user commands. */
     if (server.port != 0 &&
         listenToPort(server.port,server.ipfd,&server.ipfd_count) == C_ERR)
@@ -2893,6 +2903,8 @@ void initServer(void) {
         for (int i = 0; i < HASH_SLOTS_SIZE; i ++) {
             server.db[j].hash_slots[i] = dictCreate(&hashSlotType, NULL);
         }
+        server.db[j].hash_slots_rehashing = 0;
+        server.db[j].tagged_keys = zslCreate();
 
         server.db[j].defrag_later = listCreate();
         listSetFreeMethod(server.db[j].defrag_later,(void (*)(void*))sdsfree);
