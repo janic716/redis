@@ -318,7 +318,7 @@ int dbSyncDelete(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
-
+    slots_del_key(db, key);
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
         if (server.cluster_enabled) slotToKeyDel(key->ptr);
         return 1;
@@ -330,18 +330,6 @@ int dbSyncDelete(redisDb *db, robj *key) {
 /* This is a wrapper whose behavior depends on the Redis lazy free
  * configuration. Deletes the key synchronously or asynchronously. */
 int dbDelete(redisDb *db, robj *key) {
-    //codis
-    do {
-        uint32_t crc;
-        int hastag;
-        int slot = slots_num(key->ptr, &crc, &hastag);
-        if (dictDelete(db->hash_slots[slot], key->ptr) == DICT_OK) {
-            if (hastag) {
-                zslDelete(db->tagged_keys, (double)crc, key->ptr, NULL);
-            }
-        }
-    } while (0);
-
     return server.lazyfree_lazy_server_del ? dbAsyncDelete(db,key) :
                                              dbSyncDelete(db,key);
 }

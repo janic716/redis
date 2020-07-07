@@ -409,8 +409,7 @@ singleObjectIteratorNext(client *c, singleObjectIterator *it,
             zskiplistNode *node = (rank >= 1) ? zslGetElementByRank(zs->zsl, rank) : NULL;
             do {
                 if (node != NULL) {
-                    sds field = node->ele;
-//                    incrRefCount(field);
+                    sds field = sdsdup(node->ele);
                     len += sdslen(field);
                     listAddNodeTail(ll, field);
                     uint64_t bits = convertDoubleToRawBits(node->score);
@@ -476,7 +475,7 @@ createBatchedObjectIterator(dict *hash_slot, struct zskiplist *hash_tags,
         long long timeout, unsigned int maxbulks, unsigned int maxbytes) {
     batchedObjectIterator *it = zmalloc(sizeof(batchedObjectIterator));
     it->tags = zslCreate();
-    it->keys = dictCreate(&setDictType, NULL);
+    it->keys = dictCreate(&objectKeyPointerValueDictType, NULL);
     it->list = listCreate();
     listSetFreeMethod(it->list, freeSingleObjectIteratorVoid);
     it->hash_slot = hash_slot;
@@ -590,13 +589,12 @@ batchedObjectIteratorAddKey(redisDb *db, batchedObjectIterator *it, robj *key) {
     while (node != NULL && node->score == (double)crc) {
         robj* key = createStringObject(node->ele, sdslen(node->ele));
         node = node->level[0].forward;
-        if (dictAdd(it->keys, node->ele, NULL) != C_OK) {
+        if (dictAdd(it->keys, key, NULL) != C_OK) {
             continue;
         }
         incrRefCount(key);
         listAddNodeTail(it->list, createSingleObjectIterator(key));
         it->estimate_msgs += estimateNumberOfRestoreCommands(db, key, it->maxbulks);
-        decrRefCount(key);
     }
 
 out:
@@ -696,7 +694,8 @@ createSlotsmgrtAsyncClient(int db, char *host, int port, long timeout) {
         return C_ERR;
     }
 
-    client *c = createClient(fd);
+    connection* conn = connCreateAcceptedSocket(fd);
+    client *c = createClient(conn);
     if (c == NULL) {
         serverLog(LL_WARNING, "slotsmgrt_async: create client %s:%d (DB=%d) failed, %s",
                 host, port, db, server.neterr);
@@ -1159,7 +1158,7 @@ singleObjectIteratorStatus(client *c, singleObjectIterator *it) {
 static void
 batchedObjectIteratorStatus(client *c, batchedObjectIterator *it) {
     if (it == NULL) {
-        addReply(c, shared.nullarray[c->resp]);
+        addReply(c, shared.nullarray[c->resp]); //版本2为: "*-1/r/n", 版本3为: "_/r/n"
         return;
     }
     void *ptr = addReplyDeferredLen(c);

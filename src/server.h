@@ -2467,6 +2467,8 @@ int populateCommandTableParseFlags(struct redisCommand *c, char *strflags);
 
 //codis
 int slots_num(const sds s, uint32_t *pcrc, int *phastag);
+void slots_del_key(redisDb *db, robj *key);
+
 void slotsinfoCommand(client *c);
 void slotsscanCommand(client *c);
 void slotsdelCommand(client *c);

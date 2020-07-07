@@ -41,6 +41,17 @@ slots_num(const sds s, uint32_t *pcrc, int *phastag) {
     return crc & HASH_SLOTS_MASK;
 }
 
+void slots_del_key(redisDb *db, robj *key) {
+    uint32_t crc;
+    int hastag;
+    int slot = slots_num(key->ptr, &crc, &hastag);
+    if (dictDelete(db->hash_slots[slot], key->ptr) == DICT_OK) {
+        if (hastag) {
+            zslDelete(db->tagged_keys, (double)crc, key->ptr, NULL);
+        }
+    }
+}
+
 static int
 parse_int(client *c, robj *obj, int *p) {
     long v;
@@ -714,11 +725,12 @@ slotsmgrttag_command(client *c, sds host, sds port, int timeout, robj *key) {
     range.maxex = 0;
 
     list *l = listCreate();
-    listSetFreeMethod(l, zfree);
+    listSetFreeMethod(l, decrRefCountVoid);
 
     zskiplistNode *node = zslFirstInRange(c->db->tagged_keys, &range);
     while (node != NULL && node->score == (double)crc) {
-        listAddNodeTail(l, node->ele);
+        robj* k = createStringObject(node->ele, sdslen(node->ele));
+        listAddNodeTail(l, k);
         node = node->level[0].forward;
     }
 
