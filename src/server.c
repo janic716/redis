@@ -1035,7 +1035,7 @@ struct redisCommand redisCommandTable[] = {
       {"slotsmgrt-async-status",slotsmgrtAsyncStatusCommand,0,"read-only @slots",0,NULL,0,0,0,0,0, 0},
       {"slotsmgrt-exec-wrapper",slotsmgrtExecWrapperCommand,-3,"read-only @slots",0,NULL,0,0,0,0,0, 0},
       {"slotsrestore-async",slotsrestoreAsyncCommand,-2,"read-only @slots",0,NULL,0,0,0,0,0, 0},
-      {"slotsrestore-async-auth",slotsrestoreAsyncAuthCommand,2,"read-only @slots",0,NULL,0,0,0,0,0, 0},
+      {"slotsrestore-async-auth",slotsrestoreAsyncAuthCommand,2,"no-auth read-only @slots",0,NULL,0,0,0,0,0, 0},
       {"slotsrestore-async-select",slotsrestoreAsyncSelectCommand,2,"read-only @slots",0,NULL,0,0,0,0,0, 0},
       {"slotsrestore-async-ack",slotsrestoreAsyncAckCommand,3,"read-only @slots",0,NULL,0,0,0,0,0, 0},
 };
