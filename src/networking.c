@@ -1126,6 +1126,8 @@ void freeClient(client *c) {
         listDelNode(server.clients_to_close,ln);
     }
 
+    slotsmgrtAsyncUnlinkClient(c);
+
     /* If it is our master that's beging disconnected we should make sure
      * to cache the state to try a partial resynchronization later.
      *

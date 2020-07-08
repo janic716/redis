@@ -590,6 +590,7 @@ batchedObjectIteratorAddKey(redisDb *db, batchedObjectIterator *it, robj *key) {
         robj* key = createStringObject(node->ele, sdslen(node->ele));
         node = node->level[0].forward;
         if (dictAdd(it->keys, key, NULL) != C_OK) {
+            decrRefCount(key);
             continue;
         }
         incrRefCount(key);

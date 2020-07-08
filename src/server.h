@@ -2495,6 +2495,7 @@ void slotsrestoreAsyncAuthCommand(client *c);
 void slotsrestoreAsyncSelectCommand(client *c);
 void slotsrestoreAsyncAckCommand(client *c);
 
+void slotsmgrt_cleanup();
 void slotsmgrtAsyncCleanup();
 void slotsmgrtAsyncUnlinkClient(client *c);
 void slotsmgrtInitLazyReleaseWorkerThread();

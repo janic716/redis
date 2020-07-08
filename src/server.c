@@ -2109,6 +2109,12 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     /* Run the Sentinel timer if we are in sentinel mode. */
     if (server.sentinel_mode) sentinelTimer();
 
+
+    run_with_period(1000) {
+        slotsmgrt_cleanup();
+        slotsmgrtAsyncCleanup();
+    }
+
     /* Cleanup expired MIGRATE cached sockets. */
     run_with_period(1000) {
         migrateCloseTimedoutSockets();
