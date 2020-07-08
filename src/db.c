@@ -214,6 +214,16 @@ int dbAddRDBLoad(redisDb *db, sds key, robj *val) {
     int retval = dictAdd(db->dict, key, val);
     if (retval != DICT_OK) return 0;
     if (server.cluster_enabled) slotToKeyAdd(key);
+    //codis
+    do {
+        uint32_t crc;
+        int hastag;
+        int slot = slots_num(key, &crc, &hastag);
+        dictAdd(db->hash_slots[slot], sdsdup(key), (void *)(long)crc);
+        if (hastag) {
+            zslInsert(db->tagged_keys, (double)crc, sdsdup(key));
+        }
+    } while (0);
     return 1;
 }
 
