@@ -185,7 +185,7 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
         uint32_t crc;
         int hastag;
         int slot = slots_num(key->ptr, &crc, &hastag);
-        dictAdd(db->hash_slots[slot], copy, (void *)(long)crc);
+        dictAdd(db->hash_slots[slot], sdsdup(key->ptr), (void *)(long)crc);
         if (hastag) {
             zslInsert(db->tagged_keys, (double)crc, sdsdup(key->ptr));
         }
