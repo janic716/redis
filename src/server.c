@@ -1380,7 +1380,7 @@ dictType hashSlotType = {
         NULL,                       /* key dup */
         NULL,                       /* val dup */
         dictSdsKeyCompare,          /* key compare */
-        NULL,                       /* key destructor */
+        dictSdsDestructor,                       /* key destructor */
         NULL                        /* val destructor */
 };
 
