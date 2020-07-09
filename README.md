@@ -1,3 +1,7 @@
+
+make some migration for codis3.2 (support all slots commands, base on redis6.05)
+
+--------------
 This README is just a fast *quick start* document. You can find more detailed documentation at [redis.io](https://redis.io).
 
 What is Redis?
