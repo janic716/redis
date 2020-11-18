@@ -120,13 +120,16 @@ singleObjectIteratorScanCallback(void *data, const dictEntry *de) {
     void **pd = (void **)data;
     list *l = pd[0];
     robj *o = pd[1];
+    sds k, v;
     long long *n = pd[2];
 
     robj *objs[2] = {NULL, NULL};
     switch (o->type) {
     case OBJ_HASH:
-        objs[0] = dictGetKey(de);
-        objs[1] = dictGetVal(de);
+        k = dictGetKey(de);
+        v = dictGetVal(de);
+        objs[0] = createStringObject(k,sdslen(k));
+        objs[1] = createStringObject(v,sdslen(v));
         break;
     case OBJ_SET:
         objs[0] = dictGetKey(de);
@@ -1505,8 +1508,8 @@ slotsrestoreAsyncHandle(client *c) {
             dict *ht = val->ptr;
             dictExpand(ht, hint);
         }
+        hashTypeTryConversion(val,c->argv,2,c->argc-1);
         for (int i = 0; i < xargc; i += 2) {
-            hashTypeTryObjectEncoding(val, &xargv[i], &xargv[i + 1]);
             hashTypeSet(val, xargv[i]->ptr, xargv[i + 1]->ptr, HASH_SET_COPY);
         }
         slotsrestoreReplyAck(c, 0, "%d", hashTypeLength(val));
