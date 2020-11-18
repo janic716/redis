@@ -137,7 +137,6 @@ singleObjectIteratorScanCallback(void *data, const dictEntry *de) {
     }
     for (int i = 0; i < 2; i ++) {
         if (objs[i] != NULL) {
-            incrRefCount(objs[i]);
             *n += sdslenOrElse(objs[i], 8);
             listAddNodeTail(l, objs[i]);
         }
