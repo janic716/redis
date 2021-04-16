@@ -33,3 +33,8 @@ deps/lua/src/liblua.a
 Makefile.dep
 .vscode/*
 .idea/*
+/deps/hiredis/Makefile
+/deps/linenoise/Makefile
+/deps/lua/Makefile
+/deps/Makefile
+/Makefile
