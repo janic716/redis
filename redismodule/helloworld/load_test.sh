@@ -14,7 +14,7 @@ module_obj="module_demo.so"
 
 gcc module.c  -Wall -Wno-unused-function -fPIC -std=c11 -D_GUN_SOURCE -shared -o $module_obj
 
-$REDIS_CLI module unload "helloworld" > /dev/null 2>&1
+$REDIS_CLI module unload $module_name > /dev/null 2>&1
 res=`$REDIS_CLI module load "$script_home/$module_obj"`
 if [[ $res == "OK" ]];then
   echo "load module $module_name success!!"
