@@ -5,95 +5,23 @@ set(CMAKE_BUILD_TYPE "Debug")
 get_filename_component(REDIS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" ABSOLUTE)
 
 add_subdirectory(deps)
+add_subdirectory(redismodule/trie)
 add_subdirectory(redismodule/helloworld)
+add_subdirectory(src/modules)
 
 include_directories(src)
 
-set(SRC_SERVER
-        src/server.c
-        src/adlist.c
-        src/ae.c
-        src/anet.c
-        src/dict.c
-        src/sds.c
-        src/zmalloc.c
-        src/lzf_c.c
-        src/lzf_d.c
-        src/pqsort.c
-        src/zipmap.c
-        src/sha1.c
-        src/ziplist.c
-        src/release.c
-        src/networking.c
-        src/util.c
-        src/object.c
-        src/db.c
-        src/replication.c
-        src/rdb.c
-        src/t_string.c
-        src/t_list.c
-        src/t_set.c
-        src/t_zset.c
-        src/evict.c
-        src/defrag.c
-        src/module.c
-        src/quicklist.c
-        src/expire.c
-        src/childinfo.c
-        src/redis-check-aof.c
-        src/redis-check-rdb.c
-        src/lazyfree.c
-        src/geohash.c
-        src/rax.c
-        src/geohash_helper.c
-        src/siphash.c
-        src/geo.c
-        src/t_hash.c
-        src/config.c
-        src/aof.c
-        src/pubsub.c
-        src/multi.c
-        src/debug.c
-        src/sort.c
-        src/intset.c
-        src/syncio.c
-        src/cluster.c
-        src/crc16.c
-        src/endianconv.c
-        src/slowlog.c
-        src/scripting.c
-        src/bio.c
-        src/rio.c
-        src/rand.c
-        src/memtest.c
-        src/crc64.c
-        src/bitops.c
-        src/sentinel.c
-        src/notify.c
-        src/setproctitle.c
-        src/blocked.c
-        src/hyperloglog.c
-        src/latency.c
-        src/sparkline.c
-        src/t_stream.c
-        src/lolwut.c
-        src/lolwut5.c
-        src/listpack.c
-        src/localtime.c
-        src/connection.c
-        src/acl.c
-        src/blocked.c
-        src/timeout.c
-        src/tls.c
-        src/tracking.c
-        src/crcspeed.c
-        src/lolwut.c
-        src/lolwut5.c
-        src/lolwut6.c
-        src/gopher.c
-        src/sha256.c
-        src/siphash.c
-        )
+
+file(GLOB SRC_SERVER_FILE_LIST  "src/*.c")
+file(GLOB SRC_SERVER_FILE_LIST_EXCLUDE src/ae_*.c src/redis-cli.c src/redis-benchmark.c)
+list(REMOVE_ITEM SRC_SERVER_FILE_LIST ${SRC_SERVER_FILE_LIST_EXCLUDE})
+
+#message(${CMAKE_CURRENT_SOURCE_DIR})
+#message(${CMAKE_CURRENT_SOURCE_DIR}/src/ae_kqueue.c)
+
+
+
+set(SRC_SERVER ${SRC_SERVER_FILE_LIST})
 #set(SRC_SERVER src/server.c ${SRC_SERVER})
 
 set(SRC_CLI
@@ -112,6 +40,7 @@ set(SRC_CLI
         src/crcspeed.c
         )
 
+
 EXECUTE_PROCESS(COMMAND sh mkreleasehdr.sh WORKING_DIRECTORY "src")
 
 
@@ -125,22 +54,20 @@ target_include_directories(redis-server
         PRIVATE ${REDIS_ROOT}/deps/hiredis
         PRIVATE ${REDIS_ROOT}/deps/lua/src)
 target_link_libraries(redis-server
-        PRIVATE pthread
-        PRIVATE m
         PRIVATE lua
         PRIVATE linenoise
-        PRIVATE hiredis)
+        PRIVATE hiredis
+        )
 
 #
 add_executable(redis-cli ${SRC_CLI})
 target_include_directories(redis-cli
         PRIVATE ${REDIS_ROOT}/deps/linenoise
         PRIVATE ${REDIS_ROOT}/deps/hiredis
-        PRIVATE ${REDIS_ROOT}/deps/lua/src)
+        PRIVATE ${REDIS_ROOT}/deps/lua/src
+        )
 
 target_link_libraries(redis-cli
-        PRIVATE pthread
-        PRIVATE m
         PRIVATE linenoise
         PRIVATE hiredis
         )
